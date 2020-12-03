@@ -388,8 +388,8 @@ if __name__ == "__main__":
     environment = SpaceXRL()
     level = 0
 
-    n_episodes = 1000
-    n_episode_per_batch = 100
+    n_episodes = 10
+    n_episode_per_batch = 10
     # Switch it to True if you want to restart from your previous agent
     load = False
 
