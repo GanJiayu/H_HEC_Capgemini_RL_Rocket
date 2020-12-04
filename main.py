@@ -437,6 +437,7 @@ if __name__ == "__main__":
 
     n_episodes = 512
     n_episode_per_batch = 128
+
     # Switch it to True if you want to restart from your previous agent
     load = False
 
