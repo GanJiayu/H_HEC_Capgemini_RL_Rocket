@@ -28,7 +28,7 @@ from utils import (
 from pyvirtualdisplay import Display
 
 # Group Info :
-GROUP_NAME = "ADMIN"
+GROUP_NAME = "LEIBNIZ"
 
 display = Display(visible=0, size=(1400, 900))
 display.start()
@@ -253,21 +253,35 @@ class SpaceXRL:
         """
         ##### Agent definition ########
         if not (load):
+            print(f"INIT AGENT.")
             agent = Agent.create(
                 agent="ppo",
-                batch_size=10,
-                # param1=value, e.g discount=x,
-                # param2=value,
-                # etc...,
+                states=env.states(),
+                actions={
+                    "type":"int",
+                    "shape":(3,),
+                    "num_values":10
+                },
+                max_episode_timesteps=100000,
+                batch_size=8,
+                #discount=0.99,
+                exploration=0.01,
+                learning_rate=0.0005,
+                #memory=200000,
+                config=dict(
+                    name="ppo_agent"
+                ),
                 saver=dict(
                     directory="data/checkpoints",
-                    frequency=10,  # save checkpoint every 10 updates
+                    frequency=10  # save checkpoint every 10 updates
                 ),  # don't change this
-                environment=env,
+                # environment=env,
             )
 
         else:
-            agent = Agent.load(directory="data/checkpoints")
+            print(f"RELOADING AGENT.")
+            agent = Agent.load(directory="data/checkpoints",
+                                filename="ppo_agent")
         return agent
 
     def episode(self, env, episode_number, agent, test=False, verbose=False):
@@ -291,8 +305,10 @@ class SpaceXRL:
         internals = agent.initial_internals()
         terminal = False
         timestep = 0
+        self.prev_shape = None
         reward_list = []
         while not terminal:
+            
             timestep += 1
             # Run episode
             episode_length += 1
@@ -305,14 +321,20 @@ class SpaceXRL:
                 # actions = agent.act(states=states, independent=False)
             else:
                 actions = agent.act(states=states, independent=False)
+            final_actions = []
+            lut = [l for l in np.arange(-1,1.1,2/10.0)]
+            for action in actions:
+                final_actions.append(lut[action])
             if (timestep % 10 == 0) and verbose:
-                print("actions", actions)
+                print("actions", final_actions)
 
-            states, terminal, reward = env.execute(actions=actions)
+            states, terminal, reward = env.execute(actions=final_actions)
             reward = self.reward_function(states, timestep)
             reward_list.append(reward)
-
+            if terminal:
+                print(f"Angle {states[2]}")
             if not (test):
+                # print(f"reward of {reward} was observed")
                 agent.observe(terminal=terminal, reward=reward)
             # if test:
             #     agent.observe(terminal=terminal, reward=reward)
@@ -369,9 +391,34 @@ class SpaceXRL:
             additionnal_information,
         ) = info_extractor(states_list, self.env)
 
+        #if timestep%10 == 0:
+        #    print(f"velocity_y {velocity_y}")
+        #    print(f"angle {angle}")
         ######## REWARD SHAPING ###########
         # reward definition (per timestep) : You have to fill it !
-        reward = -1
+        shape = 0
+        reward = 0
+        # Penalty on ill position
+        shape -= \
+                 .1 * abs(distance) + \
+                 0.5 * abs(velocity) + \
+                 5 * abs(angle) + \
+                 0.15 * abs(angular_velocity)
+                 #.1 * max((velocity - y), 0)
+
+                
+
+        # Reward for partial failure scenarios
+        shape += 0.1 * (float(first_leg_contact) + float(second_leg_contact))
+        
+        if self.prev_shape is not None:
+            reward += shape - self.prev_shape
+        self.prev_shape = shape
+    
+        reward = np.clip(reward, -1, 1)
+
+        if landed_full:
+            reward = 100 - 5 * abs(x)
 
         display_info(states, additionnal_information, reward, timestep, verbose=False)
 
@@ -388,8 +435,8 @@ if __name__ == "__main__":
     environment = SpaceXRL()
     level = 0
 
-    n_episodes = 1000
-    n_episode_per_batch = 100
+    n_episodes = 512
+    n_episode_per_batch = 128
     # Switch it to True if you want to restart from your previous agent
     load = False
 
