@@ -174,6 +174,14 @@ class SpaceXRL:
         result_data = prep_data_to_send(inputs, GROUP_NAME, DATE)
         send_result(result_data)
 
+    def translate_actions(self, actions) -> list:
+        # actions [gimbal, throttle, side_booster]
+        return [
+            [-1, -0.5, 0, 0.5, 1][actions["gimbal"][0]],
+            [-1, -0.5, 0, 0.5, 1][actions["throttle"][0]],
+            [-1, -0.5, 0, 0.5, 1][actions["side_booster"][0]],
+        ]
+
     def compute_score(
         self, states_list, timestep=0, print_states=True, print_additionnal_info=True
     ):
@@ -256,20 +264,26 @@ class SpaceXRL:
             print(f"INIT AGENT.")
             agent = Agent.create(
                 agent="ppo",
-                states=env.states(),
-                actions={
-                    "type":"int",
-                    "shape":(3,),
-                    "num_values":10
-                },
+                states={'type': 'float',
+                         'shape': (10,),
+                         'min_value': [-1.000e+00, -2.000e+00, -1.000e+00, -1.000e+00, -1.000e+00,
+                                       -1.280e+00, -3.400e+00, -9.999e+03, -9.999e+03, -9.999e+03],
+                         'max_value': [1.000e+00, 2.000e+00, 1.000e+00, 1.000e+00, 1.000e+00, 
+                                       1.000e+00, 3.600e+00, 9.999e+03, 9.999e+03, 9.999e+03]},
+                actions=dict(
+                    gimbal=dict(type='int', shape=1, num_values=5),
+                    throttle=dict(type='int', shape=1, num_values=5),
+                    side_booster=dict(type='int', shape=1, num_values=5),
+                ),
                 max_episode_timesteps=100000,
                 batch_size=8,
-                #discount=0.99,
+                discount=0.99,
                 exploration=0.01,
-                learning_rate=0.0005,
-                #memory=200000,
+                #entropy_regularization=1e-3,
+                #l2_regularization=1e-3,
+                learning_rate=5e-4,
                 config=dict(
-                    name="ppo_agent"
+                    name="ppo_agent_V3"
                 ),
                 saver=dict(
                     directory="data/checkpoints",
@@ -281,7 +295,7 @@ class SpaceXRL:
         else:
             print(f"RELOADING AGENT.")
             agent = Agent.load(directory="data/checkpoints",
-                                filename="ppo_agent")
+                                filename="ppo_agent_V3")
         return agent
 
     def episode(self, env, episode_number, agent, test=False, verbose=False):
@@ -321,14 +335,15 @@ class SpaceXRL:
                 # actions = agent.act(states=states, independent=False)
             else:
                 actions = agent.act(states=states, independent=False)
-            final_actions = []
-            lut = [l for l in np.arange(-1,1.1,2/10.0)]
-            for action in actions:
-                final_actions.append(lut[action])
+            actions = self.translate_actions(actions)
+            #final_actions = []
+            #lut = [l for l in np.arange(-1,1.1,2/10.0)]
+            #for action in actions:
+            #    final_actions.append(lut[action])
             if (timestep % 10 == 0) and verbose:
-                print("actions", final_actions)
+                print("actions", actions)
 
-            states, terminal, reward = env.execute(actions=final_actions)
+            states, terminal, reward = env.execute(actions=actions)
             reward = self.reward_function(states, timestep)
             reward_list.append(reward)
             if terminal:
@@ -403,10 +418,10 @@ class SpaceXRL:
                  .1 * abs(distance) + \
                  0.5 * abs(velocity) + \
                  5 * abs(angle) + \
-                 0.15 * abs(angular_velocity)
+                 0.15 * abs(angular_velocity) + \
+                 10 * abs(x) + \
+                 0.5 * max(velocity_y - y, 0)
                  #.1 * max((velocity - y), 0)
-
-                
 
         # Reward for partial failure scenarios
         shape += 0.1 * (float(first_leg_contact) + float(second_leg_contact))
@@ -418,7 +433,7 @@ class SpaceXRL:
         reward = np.clip(reward, -1, 1)
 
         if landed_full:
-            reward = 100 - 5 * abs(x)
+            reward = 100 - 100 * abs(x)
 
         display_info(states, additionnal_information, reward, timestep, verbose=False)
 
@@ -435,7 +450,7 @@ if __name__ == "__main__":
     environment = SpaceXRL()
     level = 0
 
-    n_episodes = 512
+    n_episodes = 1024
     n_episode_per_batch = 128
 
     # Switch it to True if you want to restart from your previous agent
